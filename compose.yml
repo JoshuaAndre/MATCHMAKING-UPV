@@ -1,0 +1,34 @@
+services:
+  player-service:
+    build: ./services/player-service
+    container_name: player-service
+    ports:
+      - "8000:8000"
+
+  matchmaking-service:
+    build: ./services/matchmaking-service
+    container_name: matchmaking-service
+    ports:
+      - "8001:8000"
+    environment:
+      - MATCH_SERVICE_URL=http://match-service:8000
+    depends_on:
+      - match-service
+
+  rating-service:
+    build: ./services/rating-service
+    container_name: rating-service
+    ports:
+      - "8002:8000"
+
+  match-service:
+    build: ./services/match-service
+    container_name: match-service
+    ports:
+      - "8003:8000"
+    environment:
+      - RATING_SERVICE_URL=http://rating-service:8000
+      - PLAYER_SERVICE_URL=http://player-service:8000
+    depends_on:
+      - rating-service
+      - player-service

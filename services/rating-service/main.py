@@ -2,9 +2,14 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 app = FastAPI(
-    title="Rating Service",
-    description="Microservicio para cálculo de MMR",
-    version="1.0.0"
+    title="MATCHMAKING-UPV | Rating Service",
+    summary="Servicio de cálculo de MMR",
+    description="Calcula nuevos valores de MMR usando una fórmula tipo Elo.",
+    version="1.1.0",
+    openapi_tags=[
+        {"name": "health", "description": "Estado del servicio."},
+        {"name": "rating", "description": "Cálculo de rating."},
+    ]
 )
 
 
@@ -27,7 +32,7 @@ class RatingResponse(BaseModel):
     winner_id: str
 
 
-@app.get("/health")
+@app.get("/health", tags=["health"])
 def health():
     return {"status": "ok", "service": "rating-service"}
 
@@ -36,7 +41,7 @@ def expected_score(player_mmr: int, opponent_mmr: int) -> float:
     return 1 / (1 + 10 ** ((opponent_mmr - player_mmr) / 400))
 
 
-@app.post("/calculate", response_model=RatingResponse)
+@app.post("/calculate", tags=["rating"], response_model=RatingResponse)
 def calculate_rating(data: RatingRequest):
     player1_expected = expected_score(data.player1_mmr, data.player2_mmr)
     player2_expected = expected_score(data.player2_mmr, data.player1_mmr)
