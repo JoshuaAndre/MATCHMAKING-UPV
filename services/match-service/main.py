@@ -1,15 +1,20 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, List, Literal, Optional
 from uuid import uuid4
-import httpx
+from typing import List, Literal, Optional
 import os
+
+import httpx
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, Field, ConfigDict
+from sqlalchemy.orm import Session
+
+from database import SessionLocal, engine, Base
+from models import Match
 
 app = FastAPI(
     title="MATCHMAKING-UPV | Match Service",
     summary="Servicio de gestión de partidas",
     description="Crea partidas, las finaliza y actualiza MMR usando rating-service y player-service.",
-    version="1.2.0",
+    version="2.0.0",
     openapi_tags=[
         {"name": "health", "description": "Estado del servicio."},
         {"name": "matches", "description": "Gestión de partidas."},
@@ -42,12 +47,24 @@ class MatchResponse(BaseModel):
     player1_new_mmr: Optional[int] = None
     player2_new_mmr: Optional[int] = None
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class MatchFinishRequest(BaseModel):
     winner_id: str
 
 
-matches_db: Dict[str, MatchResponse] = {}
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/health", tags=["health"])
@@ -56,13 +73,12 @@ def health():
 
 
 @app.post("/matches", tags=["matches"], response_model=MatchResponse, status_code=201)
-def create_match(data: MatchCreate):
+def create_match(data: MatchCreate, db: Session = Depends(get_db)):
     if data.player1_id == data.player2_id:
         raise HTTPException(status_code=400, detail="Los jugadores deben ser diferentes")
 
-    match_id = str(uuid4())
-    match = MatchResponse(
-        id=match_id,
+    match = Match(
+        id=str(uuid4()),
         player1_id=data.player1_id,
         player1_mmr=data.player1_mmr,
         player2_id=data.player2_id,
@@ -74,26 +90,29 @@ def create_match(data: MatchCreate):
         player1_new_mmr=None,
         player2_new_mmr=None
     )
-    matches_db[match_id] = match
+
+    db.add(match)
+    db.commit()
+    db.refresh(match)
     return match
 
 
 @app.get("/matches", tags=["matches"], response_model=List[MatchResponse])
-def list_matches():
-    return list(matches_db.values())
+def list_matches(db: Session = Depends(get_db)):
+    return db.query(Match).all()
 
 
 @app.get("/matches/{match_id}", tags=["matches"], response_model=MatchResponse)
-def get_match(match_id: str):
-    match = matches_db.get(match_id)
+def get_match(match_id: str, db: Session = Depends(get_db)):
+    match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Partida no encontrada")
     return match
 
 
 @app.patch("/matches/{match_id}/finish", tags=["matches"], response_model=MatchResponse)
-def finish_match(match_id: str, data: MatchFinishRequest):
-    match = matches_db.get(match_id)
+def finish_match(match_id: str, data: MatchFinishRequest, db: Session = Depends(get_db)):
+    match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Partida no encontrada")
 
@@ -119,36 +138,30 @@ def finish_match(match_id: str, data: MatchFinishRequest):
         rating_response.raise_for_status()
         rating_data = rating_response.json()
 
-        httpx.put(
+        response1 = httpx.put(
             f"{PLAYER_SERVICE_URL}/players/{match.player1_id}/mmr",
             json={"mmr": rating_data["new_player1_mmr"]},
             timeout=10.0
-        ).raise_for_status()
+        )
+        response1.raise_for_status()
 
-        httpx.put(
+        response2 = httpx.put(
             f"{PLAYER_SERVICE_URL}/players/{match.player2_id}/mmr",
             json={"mmr": rating_data["new_player2_mmr"]},
             timeout=10.0
-        ).raise_for_status()
+        )
+        response2.raise_for_status()
 
     except httpx.RequestError:
         raise HTTPException(status_code=502, detail="No se pudo conectar con rating-service o player-service")
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=502, detail=f"Error en servicio interno: {e.response.text}")
 
-    updated_match = MatchResponse(
-        id=match.id,
-        player1_id=match.player1_id,
-        player1_mmr=match.player1_mmr,
-        player2_id=match.player2_id,
-        player2_mmr=match.player2_mmr,
-        region=match.region,
-        mode=match.mode,
-        status="finished",
-        winner_id=data.winner_id,
-        player1_new_mmr=rating_data["new_player1_mmr"],
-        player2_new_mmr=rating_data["new_player2_mmr"]
-    )
+    match.status = "finished"
+    match.winner_id = data.winner_id
+    match.player1_new_mmr = rating_data["new_player1_mmr"]
+    match.player2_new_mmr = rating_data["new_player2_mmr"]
 
-    matches_db[match_id] = updated_match
-    return updated_match
+    db.commit()
+    db.refresh(match)
+    return match

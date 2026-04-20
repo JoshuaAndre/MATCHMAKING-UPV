@@ -49,11 +49,16 @@ services:
     ports:
       - "8003:8000"
     environment:
+      - DATABASE_URL=postgresql://matchmaking:matchmaking@postgres:5432/matchmaking_db
       - RATING_SERVICE_URL=http://rating-service:8000
       - PLAYER_SERVICE_URL=http://player-service:8000
     depends_on:
-      - rating-service
-      - player-service
+      postgres:
+        condition: service_healthy
+      rating-service:
+        condition: service_started
+      player-service:
+        condition: service_started
 
 volumes:
   postgres_data:
