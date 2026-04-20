@@ -1,5 +1,43 @@
 # MATCHMAKING-UPV
 
+Plataforma de matchmaking basada en MMR para videojuegos, desarrollada con microservicios, Docker y PostgreSQL.
+
+## Servicios del proyecto
+
+- player-service
+- matchmaking-service
+- rating-service
+- match-service
+
+## Tecnologías usadas
+
+- Python
+- FastAPI
+- Docker Compose
+- PostgreSQL
+- SQLAlchemy
+
+## Flujo del sistema
+
+1. Se registran jugadores en `player-service`.
+2. Los jugadores entran a la cola en `matchmaking-service`.
+3. Cuando hay dos jugadores, `matchmaking-service` crea una partida en `match-service`.
+4. Al finalizar una partida, `match-service` consulta `rating-service`.
+5. `rating-service` calcula el nuevo MMR.
+6. `match-service` actualiza el nuevo MMR en `player-service`.
+
+## Persistencia
+
+- `player-service` guarda jugadores en PostgreSQL.
+- `match-service` guarda partidas en PostgreSQL.
+- `matchmaking-service` mantiene la cola en memoria.
+- `rating-service` calcula resultados sin persistencia.
+
+## Cómo ejecutar el proyecto
+
+```bash
+docker compose up --build -d# MATCHMAKING-UPV
+
 Plataforma de matchmaking basada en MMR para videojuegos, construida con microservicios.
 
 ## Servicios
