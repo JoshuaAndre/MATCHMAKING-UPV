@@ -1,7 +1,12 @@
-from fastapi import FastAPI, HTTPException, Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Dict, List
 from uuid import uuid4
+from typing import List
+
+from fastapi import FastAPI, HTTPException, Depends, Path
+from pydantic import BaseModel, Field, ConfigDict
+from sqlalchemy.orm import Session
+
+from database import SessionLocal, engine, Base
+from models import Player
 
 COMMON_SWAGGER_CONFIG = {
     "deepLinking": True,
@@ -17,7 +22,7 @@ app = FastAPI(
     description="""
 Microservicio encargado de registrar, consultar y actualizar jugadores dentro de la plataforma de matchmaking basada en MMR.
 """,
-    version="1.2.0",
+    version="2.0.0",
     swagger_ui_parameters=COMMON_SWAGGER_CONFIG,
     openapi_tags=[
         {"name": "health", "description": "Verificación de estado del servicio."},
@@ -53,6 +58,8 @@ class PlayerResponse(BaseModel):
     mmr: int
     region: str
 
+    model_config = ConfigDict(from_attributes=True)
+
 
 class PlayerMMRUpdate(BaseModel):
     mmr: int = Field(..., ge=0, description="Nuevo MMR del jugador")
@@ -60,7 +67,7 @@ class PlayerMMRUpdate(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "mmr": 1216
+                "mmr": 1215
             }
         }
     )
@@ -70,7 +77,17 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-players_db: Dict[str, PlayerResponse] = {}
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def on_startup():
+    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/health", tags=["health"], response_model=HealthResponse)
@@ -85,25 +102,26 @@ def health():
     status_code=201,
     responses={400: {"model": ErrorResponse}}
 )
-def create_player(player: PlayerCreate):
-    for existing_player in players_db.values():
-        if existing_player.username.lower() == player.username.lower():
-            raise HTTPException(status_code=400, detail="El username ya existe")
+def create_player(player: PlayerCreate, db: Session = Depends(get_db)):
+    existing_player = db.query(Player).filter(Player.username.ilike(player.username)).first()
+    if existing_player:
+        raise HTTPException(status_code=400, detail="El username ya existe")
 
-    player_id = str(uuid4())
-    new_player = PlayerResponse(
-        id=player_id,
+    new_player = Player(
+        id=str(uuid4()),
         username=player.username,
         mmr=player.mmr,
         region=player.region
     )
-    players_db[player_id] = new_player
+    db.add(new_player)
+    db.commit()
+    db.refresh(new_player)
     return new_player
 
 
 @app.get("/players", tags=["players"], response_model=List[PlayerResponse])
-def list_players():
-    return list(players_db.values())
+def list_players(db: Session = Depends(get_db)):
+    return db.query(Player).all()
 
 
 @app.get(
@@ -113,9 +131,10 @@ def list_players():
     responses={404: {"model": ErrorResponse}}
 )
 def get_player(
-    player_id: str = Path(..., description="ID único del jugador")
+    player_id: str = Path(..., description="ID único del jugador"),
+    db: Session = Depends(get_db)
 ):
-    player = players_db.get(player_id)
+    player = db.query(Player).filter(Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Jugador no encontrado")
     return player
@@ -127,16 +146,12 @@ def get_player(
     response_model=PlayerResponse,
     responses={404: {"model": ErrorResponse}}
 )
-def update_player_mmr(player_id: str, payload: PlayerMMRUpdate):
-    player = players_db.get(player_id)
+def update_player_mmr(player_id: str, payload: PlayerMMRUpdate, db: Session = Depends(get_db)):
+    player = db.query(Player).filter(Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Jugador no encontrado")
 
-    updated = PlayerResponse(
-        id=player.id,
-        username=player.username,
-        mmr=payload.mmr,
-        region=player.region
-    )
-    players_db[player_id] = updated
-    return updated
+    player.mmr = payload.mmr
+    db.commit()
+    db.refresh(player)
+    return player

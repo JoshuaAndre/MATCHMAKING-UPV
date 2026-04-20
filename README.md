@@ -29,3 +29,16 @@ Plataforma de matchmaking basada en MMR para videojuegos, construida con microse
 - [ ] Helm
 - [ ] GitHub Actions
 - [ ] DigitalOcean
+
+## Flujo funcional validado
+
+1. Se crean dos jugadores en player-service.
+2. Ambos jugadores entran a la cola en matchmaking-service.
+3. matchmaking-service crea automáticamente una partida en match-service.
+4. La partida se finaliza en match-service.
+5. match-service consulta rating-service para recalcular el MMR.
+6. match-service actualiza el nuevo MMR en player-service.
+
+### Resultado de prueba
+- PlayerOne: 1200 -> 1215
+- PlayerTwo: 1180 -> 1165

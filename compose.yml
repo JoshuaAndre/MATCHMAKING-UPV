@@ -1,9 +1,31 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: matchmaking-postgres
+    environment:
+      POSTGRES_USER: matchmaking
+      POSTGRES_PASSWORD: matchmaking
+      POSTGRES_DB: matchmaking_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matchmaking -d matchmaking_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   player-service:
     build: ./services/player-service
     container_name: player-service
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://matchmaking:matchmaking@postgres:5432/matchmaking_db
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   matchmaking-service:
     build: ./services/matchmaking-service
@@ -32,3 +54,6 @@ services:
     depends_on:
       - rating-service
       - player-service
+
+volumes:
+  postgres_data:
